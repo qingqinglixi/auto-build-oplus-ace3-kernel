@@ -43,13 +43,24 @@ jobs:
       run: |
         mkdir -p kernel_workspace
         cd kernel_workspace
+        # 移除 --depth=1 保证所有仓完整同步
         repo init -u https://github.com/OnePlusOSS/kernel_manifest.git \
-          -b oneplus/sm8550 -m oneplus_ace3_b.xml --depth=1
+          -b oneplus/sm8550 -m oneplus_ace3_b.xml
 
     - name: Sync kernel source
       run: |
         cd kernel_workspace
         repo sync -c --force-sync --no-tags --no-clone-bundle -j$(nproc)
+
+    - name: Create required directories
+      run: |
+        cd kernel_workspace
+        # 防止 mktemp 因父目录不存在而失败
+        mkdir -p out/target/product/waipio
+        # 确保 vendor 预置脚本路径存在（若仍缺失可尝试从其他仓复制）
+        mkdir -p vendor/oplus/kernel/prebuilt
+        # 若 vendorsetup.sh 确实未同步，可提供一个空占位脚本
+        touch vendor/oplus/kernel/prebuilt/vendorsetup.sh || true
 
     - name: Build kernel
       run: |
@@ -58,7 +69,8 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-gnu-
         export USE_CCACHE=1
         export CCACHE_DIR=${{ github.workspace }}/.ccache
-        ./kernel_platform/oplus/build/oplus_build_kernel.sh pineapple gki
+        # 使用正确的平台代号 waipio
+        ./kernel_platform/oplus/build/oplus_build_kernel.sh waipio gki
 
     - name: Upload kernel images
       uses: actions/upload-artifact@v4
