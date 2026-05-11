@@ -1,25 +1,22 @@
 name: Build OnePlus Kernel (Ace 3)
 
 on:
-  workflow_dispatch:      # 手动触发
-  schedule:               # 可选：定时构建
-    - cron: '0 0 * * 0'   # 每周一次
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360  # 内核编译耗时较长，延长超时
+    timeout-minutes: 360
 
     steps:
-    - name: Checkout (dummy, for workspace)
-      run: echo "Starting kernel build"
-
     - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y git-core gnupg flex bison bc build-essential \
           zip curl zstd libc6-dev libncurses5-dev xz-utils libssl-dev \
-          libelf-dev cpio python3 python2
+          libelf-dev cpio python3 python2 gcc-aarch64-linux-gnu
 
     - name: Install repo tool
       run: |
@@ -28,13 +25,18 @@ jobs:
         chmod a+x ~/.local/bin/repo
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
+    - name: Configure Git
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+
     - name: Cache repo manifest & objects
       uses: actions/cache@v3
       with:
         path: |
           ~/.repo
           kernel_workspace/.repo
-        key: repo-cache-${{ hashFiles('manifest.xml') }}
+        key: repo-cache-${{ github.run_id }}
         restore-keys: repo-cache-
 
     - name: Initialize repo manifest
@@ -52,21 +54,18 @@ jobs:
     - name: Build kernel
       run: |
         cd kernel_workspace
-        # 设置环境变量（如果脚本需要）
         export PATH=$PATH:$HOME/.local/bin
         export CROSS_COMPILE=aarch64-linux-gnu-
-        # 执行构建脚本
+        export USE_CCACHE=1
+        export CCACHE_DIR=${{ github.workspace }}/.ccache
         ./kernel_platform/oplus/build/oplus_build_kernel.sh pineapple gki
-      env:
-        # 根据实际需要添加其他环境变量，例如 ccache
-        USE_CCACHE: 1
-        CCACHE_DIR: ${{ github.workspace }}/.ccache
 
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+    - name: Upload kernel images
+      uses: actions/upload-artifact@v4
       with:
         name: kernel-images
         path: |
           kernel_workspace/out/**/*.img
           kernel_workspace/out/**/*.ko
           kernel_workspace/out/**/Image.gz
+        if-no-files-found: warn
