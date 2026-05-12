@@ -1,83 +1,46 @@
-name: Build OnePlus Kernel (Ace 3)
+name: Build OnePlus Kernel
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * 0'
+  workflow_dispatch:  # 允许手动触发
+  # push:             # 可按需开启，例如推送到特定分支时自动构建
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360
+    runs-on: ubuntu-22.04  # 使用较稳定的 Ubuntu 版本
+    timeout-minutes: 360    # 内核编译可能耗时较长，设置 6 小时超时
 
     steps:
-    - name: Install build dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git-core gnupg flex bison bc build-essential \
-          zip curl zstd libc6-dev libncurses5-dev xz-utils libssl-dev \
-          libelf-dev cpio python3 python2 gcc-aarch64-linux-gnu
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y bc bison build-essential curl flex git gnupg gperf libelf-dev \
+            libssl-dev libtinfo5 libxml2 libxml2-utils lzop pngcrush rsync schedtool \
+            squashfs-tools xsltproc zip zlib1g-dev repo
 
-    - name: Install repo tool
-      run: |
-        mkdir -p ~/.local/bin
-        curl -sSL https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
-        chmod a+x ~/.local/bin/repo
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Configure Git (repo required)
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
 
-    - name: Configure Git
-      run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
+      - name: Initialize repo manifest
+        run: |
+          repo init -u https://github.com/OnePlusOSS/kernel_manifest.git \
+            -b oneplus/sm8550 \
+            -m oneplus_ace3_b.xml
 
-    - name: Cache repo manifest & objects
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.repo
-          kernel_workspace/.repo
-        key: repo-cache-${{ github.run_id }}
-        restore-keys: repo-cache-
+      - name: Sync kernel source
+        run: |
+          repo sync -c --no-tags --no-clone-bundle -j$(nproc) --force-sync
 
-    - name: Initialize repo manifest
-      run: |
-        mkdir -p kernel_workspace
-        cd kernel_workspace
-        # 移除 --depth=1 保证所有仓完整同步
-        repo init -u https://github.com/OnePlusOSS/kernel_manifest.git \
-          -b oneplus/sm8550 -m oneplus_ace3_b.xml
+      - name: Build kernel
+        run: |
+          ./kernel_platform/oplus/build/oplus_build_kernel.sh
 
-    - name: Sync kernel source
-      run: |
-        cd kernel_workspace
-        repo sync -c --force-sync --no-tags --no-clone-bundle -j$(nproc)
-
-    - name: Create required directories
-      run: |
-        cd kernel_workspace
-        # 防止 mktemp 因父目录不存在而失败
-        mkdir -p out/target/product/waipio
-        # 确保 vendor 预置脚本路径存在（若仍缺失可尝试从其他仓复制）
-        mkdir -p vendor/oplus/kernel/prebuilt
-        # 若 vendorsetup.sh 确实未同步，可提供一个空占位脚本
-        touch vendor/oplus/kernel/prebuilt/vendorsetup.sh || true
-
-    - name: Build kernel
-      run: |
-        cd kernel_workspace
-        export PATH=$PATH:$HOME/.local/bin
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export USE_CCACHE=1
-        export CCACHE_DIR=${{ github.workspace }}/.ccache
-        # 使用正确的平台代号 waipio
-        ./kernel_platform/oplus/build/oplus_build_kernel.sh waipio gki
-
-    - name: Upload kernel images
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-images
-        path: |
-          kernel_workspace/out/**/*.img
-          kernel_workspace/out/**/*.ko
-          kernel_workspace/out/**/Image.gz
-        if-no-files-found: warn
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image
+          path: |
+            out/*.img
+            out/*.ko
+            # 根据实际编译输出路径修改，常见为 out/arch/arm64/boot/Image
